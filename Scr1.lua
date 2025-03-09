@@ -15,7 +15,7 @@ local collectingEnabled = false
 local autoStoreEnabled = false
 local serverHopEnabled = false
 local autoBuyEnabled = false -- Единственная декларация
-local FlightSpeed = 300
+local FlightSpeed = 350
 local espCache = {}
 local activeTweens = {}
 local collectCoroutine = nil
@@ -25,17 +25,15 @@ local NOTIFICATION_DURATION = 3
 local SAVE_FILE = "lastPurchaseTime_" .. player.UserId .. ".txt" -- Уникальный файл для каждого аккаунта
 
 local wantedFruits = {
-    ["Kilo Fruit"] = true, ["Spring Fruit"] = true, ["Spin Fruit"] = true, ["Chop Fruit"] = true, ["Sprint Fruit"] = true,
-    ["Bomb Fruit"] = true, ["Smoke Fruit"] = true, ["Spike Fruit"] = true, ["Flame Fruit"] = true,
-    ["Falcon Fruit"] = true, ["Ice Fruit"] = true, ["Sand Fruit"] = true, ["Dark Fruit"] = true,
-    ["Revive Fruit"] = true, ["Diamond Fruit"] = true, ["Light Fruit"] = true, ["Rubber Fruit"] = true,
-    ["Barrier Fruit"] = true, ["Magma Fruit"] = true, ["Quake Fruit"] = true, ["Buddha Fruit"] = true,
-    ["Love Fruit"] = true, ["Ghost Fruit"] = true, ["Spider Fruit"] = true, ["Phoenix Fruit"] = true,
-    ["Portal Fruit"] = true, ["Rumble Fruit"] = true, ["Paw Fruit"] = true, ["Blizzard Fruit"] = true,
-    ["Gravity Fruit"] = true, ["Dough Fruit"] = true, ["Shadow Fruit"] = true, ["Venom Fruit"] = true,
-    ["Control Fruit"] = true, ["Spirit Fruit"] = true, ["Dragon Fruit"] = true, ["Leopard Fruit"] = true,
-    ["Kitsune Fruit"] = true, ["T-Rex Fruit"] = true, ["Mammoth Fruit"] = true, ["Gas Fruit"] = true,
-    ["Yeti Fruit"] = true
+    ["Kilo Fruit"] = true, ["Spin Fruit"] = true, ["Chop Fruit"] = true, ["Sprint Fruit"] = true,
+["Bomb Fruit"] = true, ["Smoke Fruit"] = true, ["Spike Fruit"] = true, ["Flame Fruit"] = true,
+["Falcon Fruit"] = true, ["Ice Fruit"] = true, ["Sand Fruit"] = true, ["Dark Fruit"] = true,
+["Revive Fruit"] = true, ["Diamond Fruit"] = true, ["Light Fruit"] = true, ["Rubber Fruit"] = true,
+["Barrier Fruit"] = true, ["Magma Fruit"] = true, ["Quake Fruit"] = true,["Spider Fruit"] = true, ["Phoenix Fruit"] = true, ["Buddha Fruit"] = true,
+["Portal Fruit"] = true, ["Rumble Fruit"] = true, ["Paw Fruit"] = true, ["Blizzard Fruit"] = true,
+["Gravity Fruit"] = true, ["Dough Fruit"] = true, ["Shadow Fruit"] = true, ["Venom Fruit"] = true,
+["Control Fruit"] = true, ["Spirit Fruit"] = true, ["Dragon Fruit"] = true, ["Leopard Fruit"] = true,
+["Kitsune Fruit"] = true, ["T-Rex Fruit"] = true, ["Mammoth Fruit"] = true, ["Gas Fruit"] = true, ["Yeti Fruit"] = true
 }
 
 player.CharacterAdded:Connect(function(newChar)
@@ -219,8 +217,10 @@ local function collectFruit(fruit)
     local elapsed = 0
     local totalTime = distance / speed
     connection = RunService.Heartbeat:Connect(function(deltaTime)
-        if not hrp or not collectingEnabled then
+        if not hrp or not collectingEnabled or not handle or not handle.Parent then
             if connection then connection:Disconnect() end
+            enableCollisions() -- Восстанавливаем коллизии, если фрукт исчез
+            print("[Сбор] Телепортация остановлена: фрукт исчез или сбор отключён")
             return
         end
 
@@ -240,7 +240,7 @@ local function collectFruit(fruit)
     print("[Debug] Коллизии включены обратно")
 
     if collectingEnabled then
-        task.wait(1)
+        task.wait(0)
         local pickedFruit = player.Backpack:FindFirstChild(fruitName) or character:FindFirstChild(fruitName)
         if pickedFruit then
             print("[Сбор] Успешно подобран фрукт: " .. pickedFruit.Name)
@@ -478,30 +478,51 @@ local function startAutoBuy()
     print("[AutoBuyFruit] Запуск автоматической покупки случайных фруктов")
     while autoBuyEnabled do
         if game:IsLoaded() then
-            local success = buyRandomFruit()
-            if success then
-                print("[AutoBuyFruit] Успешная покупка, жду кулдаун 2 часа...")
-                local elapsed = 0
-                while elapsed < COOLDOWN_DURATION and autoBuyEnabled do
-                    task.wait(1)
-                    elapsed = elapsed + 1
+            -- Обновляем player для нового аккаунта
+            local player = game:GetService("Players").LocalPlayer
+            if not player then
+                print("[AutoBuyFruit] Игрок не найден, жду...")
+                task.wait(1)
+                continue
+            end
+            
+            local beli = getBeli()
+            if beli and beli >= 50000 then -- Минимальная цена фрукта
+                print("[AutoBuyFruit] Пытаюсь купить случайный фрукт...")
+                local success, result = pcall(function()
+                    return ReplicatedStorage.Remotes.CommF_:InvokeServer("Cousin", "Buy")
+                end)
+                
+                if success then
+                    if result == true or (typeof(result) == "string" and result ~= "Cooldown" and result ~= "NotEnoughMoney") then
+                        print("[AutoBuyFruit] Успешно куплен фрукт: " .. (typeof(result) == "string" and result or "Неизвестный"))
+                        showNotification("Куплен фрукт: " .. (typeof(result) == "string" and result or "Неизвестный"), Color3.fromRGB(0, 255, 0))
+                    elseif result == "Cooldown" then
+                        print("[AutoBuyFruit] Кулдаун активен, жду следующую попытку")
+                    elseif result == "NotEnoughMoney" then
+                        print("[AutoBuyFruit] Недостаточно Beli: " .. beli)
+                    else
+                        print("[AutoBuyFruit] Неизвестный результат: " .. tostring(result))
+                    end
+                else
+                    warn("[AutoBuyFruit] Ошибка покупки: " .. tostring(result))
                 end
             else
-                print("[AutoBuyFruit] Покупка не удалась, жду 30 секунд перед повтором...")
-                local elapsed = 0
-                while elapsed < 30 and autoBuyEnabled do
-                    task.wait(1)
-                    elapsed = elapsed + 1
-                end
+                print("[AutoBuyFruit] Недостаточно Beli или данные не загружены: " .. tostring(beli))
             end
         else
-            warn("[AutoBuyFruit] Игра не загружена, жду загрузки...")
+            print("[AutoBuyFruit] Игра не загружена, жду...")
             game.Loaded:Wait()
+        end
+        -- Задержка 5 минут (300 секунд) между попытками
+        local elapsed = 0
+        while elapsed < 30 and autoBuyEnabled do
+            task.wait(1)
+            elapsed = elapsed + 1
         end
     end
     print("[AutoBuyFruit] Автоматическая покупка остановлена")
 end
-
 game.DescendantAdded:Connect(function(child)
     if (child:IsA("Tool") or child:IsA("Model")) then
         local handle = child:FindFirstChild("Handle") or child:FindFirstChildOfClass("Part") or child:FindFirstChildOfClass("MeshPart")
@@ -554,128 +575,291 @@ local function resetVisitedServers()
     end
 end
 
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Предполагается, что эти переменные определены
+local serverHopEnabled = true -- Переключатель, который вы используете
+local visitedServers = {} or {}
+local ServerHopSettings = {} or {}
+local BLOX_FRUITS_PLACE_ID = 2753915549 -- PlaceID для Blox Fruits
+local function SaveServerHopSettings() end -- Функция для сохранения настроек, если она определена
+local function resetVisitedServers() visitedServers = {} end
+local function showNotification(message, color)
+    -- Предполагается, что эта функция определена в вашем GUI
+    print("Уведомление: " .. message) -- Замените на реальную функцию, если есть
+end
+
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Предполагается, что эти переменные определены
+local serverHopEnabled = true -- Переключатель
+local visitedServers = {} or {}
+local ServerHopSettings = {} or {}
+local BLOX_FRUITS_PLACE_ID = 2753915549 -- PlaceID для Blox Fruits
+local function SaveServerHopSettings() end -- Функция для сохранения настроек
+local function resetVisitedServers() visitedServers = {} end
+local function showNotification(message, color)
+    -- Предполагается, что эта функция определена в вашем GUI
+    print("Уведомление: " .. message) -- Замените на реальную функцию, если есть
+end
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local BLOX_FRUITS_PLACE_ID = 2753915549 -- PlaceID для Blox Fruits
+local visitedServers = {}
+local ServerHopSettings = {}
+local ServerHopFileName = "bloxfruitsServerHop.json"
+
+local function SaveServerHopSettings()
+    local HttpService = game:GetService("HttpService")
+    writefile(ServerHopFileName, HttpService:JSONEncode(ServerHopSettings))
+end
+
+local function ReadServerHopSettings()
+    local s, e = pcall(function()
+        local HttpService = game:GetService("HttpService")
+        return HttpService:JSONDecode(readfile(ServerHopFileName))
+    end)
+    if s then
+        return e
+    else
+        SaveServerHopSettings()
+        return ReadServerHopSettings()
+    end
+end
+ServerHopSettings = ReadServerHopSettings()
+
+local function resetVisitedServers()
+    if tick() - lastResetTime >= 3600 then
+        print("[NewServerHop] Прошёл час, обнуляю список посещённых серверов")
+        visitedServers = {}
+        ServerHopSettings = {}
+        SaveServerHopSettings()
+        lastResetTime = tick()
+    end
+end
+
+-- Зависимости
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Переменные
+local BLOX_FRUITS_PLACE_ID = 2753915549 -- PlaceID для Blox Fruits
+local visitedServers = {}
+local ServerHopSettings = {}
+local ServerHopFileName = "bloxfruitsServerHop.json"
+local lastResetTime = tick()
+local serverHopEnabled = false -- Переменная для управления Server Hop (должна управляться через GUI)
+
+-- Функции сохранения и чтения настроек
+local function SaveServerHopSettings()
+    local HttpService = game:GetService("HttpService")
+    writefile(ServerHopFileName, HttpService:JSONEncode(ServerHopSettings))
+end
+
+local function ReadServerHopSettings()
+    local s, e = pcall(function()
+        local HttpService = game:GetService("HttpService")
+        return HttpService:JSONDecode(readfile(ServerHopFileName))
+    end)
+    if s then
+        return e
+    else
+        SaveServerHopSettings()
+        return ReadServerHopSettings()
+    end
+end
+ServerHopSettings = ReadServerHopSettings()
+
+-- Функция сброса посещённых серверов
+local function resetVisitedServers()
+    if tick() - lastResetTime >= 3600 then
+        print("[NewServerHop] Прошёл час, обнуляю список посещённых серверов")
+        visitedServers = {}
+        ServerHopSettings = {}
+        SaveServerHopSettings()
+        lastResetTime = tick()
+    end
+end
+
+-- Функция телепортации на новый сервер
 local function serverHop()
-    resetVisitedServers()
     print("[NewServerHop] Начало попытки телепортации")
     local currentServerId = game.JobId or "unknown"
+    print("[NewServerHop] Текущий сервер ID: " .. tostring(currentServerId))
+
     if currentServerId ~= "unknown" then
         visitedServers[currentServerId] = true
         ServerHopSettings[currentServerId] = { Time = tick() }
         SaveServerHopSettings()
-        print("[NewServerHop] Текущий сервер " .. currentServerId .. " добавлен в исключения")
+        print("[NewServerHop] Текущий сервер добавлен в исключения")
     else
-        warn("[NewServerHop] Не удалось получить текущий JobId")
+        warn("[NewServerHop] Не удалось получить JobId, продолжение возможно")
     end
 
-    for i = 1, 200 do
-        local success, serverlist = pcall(function()
-            return ReplicatedStorage.__ServerBrowser:InvokeServer(i)
+    if not game:IsLoaded() then
+        warn("[NewServerHop] Игра не загружена, ожидание...")
+        game.Loaded:Wait()
+    end
+    local player = Players.LocalPlayer
+    if not player or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+        warn("[NewServerHop] Игрок или персонаж не готовы, пропускаю телепортацию")
+        return false
+    end
+
+    local maxAttempts = 3
+    local attempt = 1
+
+    while attempt <= maxAttempts and serverHopEnabled do
+        print("[NewServerHop] Попытка телепортации #" .. attempt)
+        print("[NewServerHop] Проверка состояния игры...")
+        if not game:IsLoaded() then
+            warn("[NewServerHop] Игра не загружена во время попытки #" .. attempt)
+            break
+        end
+
+        local success, teleportError = pcall(function()
+            print("[NewServerHop] Выполняю телепортацию на Place ID: " .. BLOX_FRUITS_PLACE_ID)
+            TeleportService:Teleport(BLOX_FRUITS_PLACE_ID, Players.LocalPlayer)
         end)
 
         if not success then
-            warn("[NewServerHop] Ошибка при получении списка серверов: " .. tostring(serverlist))
-            return false
-        end
-
-        if not serverlist then
-            warn("[NewServerHop] Список серверов пуст")
-            return false
-        end
-
-        for serverId, serverInfo in pairs(serverlist) do
-            if serverId ~= currentServerId and not visitedServers[serverId] and serverInfo.Count < 11 then
-                print("[NewServerHop] Выбран сервер " .. serverId .. " (" .. serverInfo.Count .. "/12 игроков)")
-                visitedServers[serverId] = true
-                ServerHopSettings[serverId] = { Time = tick() }
-                SaveServerHopSettings()
-
-                local success, teleportError = pcall(function()
-                    ReplicatedStorage.__ServerBrowser:InvokeServer("teleport", serverId)
+            warn("[NewServerHop] Ошибка телепортации (попытка " .. attempt .. "): " .. tostring(teleportError))
+            if string.find(tostring(teleportError), "279") then
+                warn("[NewServerHop] Обнаружена ошибка 279, начинаю переподключение...")
+                showNotification("Ошибка 279: Начинаю переподключение...", Color3.fromRGB(255, 0, 0))
+                local retrySuccess, retryError = pcall(function()
+                    task.wait(5)
+                    print("[NewServerHop] Пытаюсь переподключиться к новому серверу...")
+                    TeleportService:Teleport(BLOX_FRUITS_PLACE_ID, Players.LocalPlayer)
                 end)
-
-                if not success then
-                    warn("[NewServerHop] Ошибка телепортации на сервер " .. serverId .. ": " .. tostring(teleportError))
-                    return false
-                end
-
-                print("[NewServerHop] Ожидаю загрузки игры после телепортации...")
-                while not game:IsLoaded() do
-                    task.wait(1)
-                end
-
-                local newServerId = game.JobId or "unknown"
-                if newServerId == "unknown" then
-                    warn("[NewServerHop] Не удалось определить JobId после телепортации")
-                    return false
-                end
-
-                if newServerId == currentServerId or visitedServers[newServerId] then
-                    warn("[NewServerHop] Вернулись на уже посещенный сервер " .. newServerId)
-                    visitedServers[newServerId] = true
-                    ServerHopSettings[newServerId] = { Time = tick() }
-                    SaveServerHopSettings()
-                    return false
-                else
-                    print("[NewServerHop] Успешно подключился к новому серверу: " .. newServerId)
-                    visitedServers[newServerId] = true
-                    ServerHopSettings[newServerId] = { Time = tick() }
-                    SaveServerHopSettings()
+                if retrySuccess then
+                    print("[NewServerHop] Переподключение успешно инициировано")
+                    showNotification("Переподключение инициировано, ожидайте загрузки...", Color3.fromRGB(0, 255, 0))
                     return true
+                else
+                    warn("[NewServerHop] Ошибка при переподключении: " .. tostring(retryError))
+                    showNotification("Ошибка при переподключении: " .. tostring(retryError), Color3.fromRGB(255, 0, 0))
                 end
-            elseif serverInfo.Count >= 11 then
-                print("[NewServerHop] Сервер " .. serverId .. " полон (" .. serverInfo.Count .. "/12), пропускаю")
-                visitedServers[serverId] = true
-                ServerHopSettings[serverId] = { Time = tick() }
-                SaveServerHopSettings()
+            else
+                warn("[NewServerHop] Другая ошибка: " .. tostring(teleportError))
+            end
+            attempt = attempt + 1
+            task.wait(30)
+            continue
+        end
+
+        print("[NewServerHop] Ожидаю загрузки нового сервера...")
+        local loadTimeout = 40
+        local elapsed = 0
+        local disconnected = false
+
+        local connection
+        connection = game:GetService("NetworkClient").ChildRemoved:Connect(function(child)
+            if child.Name == "ClientReplicator" then
+                disconnected = true
+                warn("[NewServerHop] Обнаружено отключение во время ожидания загрузки")
+                if connection then connection:Disconnect() end
+            end
+        end)
+
+        while elapsed < loadTimeout and not game:IsLoaded() and not disconnected do
+            task.wait(1)
+            elapsed = elapsed + 1
+            print("[NewServerHop] Ожидание загрузки... (" .. elapsed .. "с из " .. loadTimeout .. "с)")
+        end
+
+        if connection then connection:Disconnect() end
+
+        if disconnected then
+            warn("[NewServerHop] Отключение произошло, пытаюсь переподключиться")
+            showNotification("Отключение: Пытаюсь переподключиться...", Color3.fromRGB(255, 0, 0))
+            local retrySuccess, retryError = pcall(function()
+                task.wait(5)
+                print("[NewServerHop] Пытаюсь переподключиться к новому серверу...")
+                TeleportService:Teleport(BLOX_FRUITS_PLACE_ID, Players.LocalPlayer)
+            end)
+            if retrySuccess then
+                print("[NewServerHop] Переподключение успешно инициировано")
+                showNotification("Переподключение инициировано, ожидайте загрузки...", Color3.fromRGB(0, 255, 0))
+                return true
+            else
+                warn("[NewServerHop] Ошибка при переподключении: " .. tostring(retryError))
+                showNotification("Ошибка при переподключении: " .. tostring(retryError), Color3.fromRGB(255, 0, 0))
+                return false
             end
         end
+
+        if not game:IsLoaded() then
+            warn("[NewServerHop] Тайм-аут загрузки нового сервера")
+            attempt = attempt + 1
+            task.wait(30)
+            continue
+        end
+
+        local newServerId = game.JobId or "unknown"
+        print("[NewServerHop] Новый сервер ID: " .. tostring(newServerId))
+        if newServerId == "unknown" or (newServerId == currentServerId and attempt < maxAttempts) then
+            warn("[NewServerHop] Не удалось переключиться на новый сервер или вернулись на текущий")
+            attempt = attempt + 1
+            task.wait(30)
+            continue
+        else
+            print("[NewServerHop] Успешно подключился к новому серверу: " .. newServerId)
+            visitedServers[newServerId] = true
+            ServerHopSettings[newServerId] = { Time = tick() }
+            SaveServerHopSettings()
+            return true
+        end
     end
 
-    warn("[NewServerHop] Не удалось найти подходящий сервер, пробую случайную телепортацию...")
-    local success, teleportError = pcall(function()
-        TeleportService:Teleport(BLOX_FRUITS_PLACE_ID, Players.LocalPlayer)
-    end)
-
-    if not success then
-        warn("[NewServerHop] Ошибка при случайной телепортации: " .. tostring(teleportError))
-        return false
-    end
-
-    print("[NewServerHop] Ожидаю загрузки игры после телепортации...")
-    while not game:IsLoaded() do
-        task.wait(1)
-    end
-
-    local newServerId = game.JobId or "unknown"
-    if newServerId == "unknown" then
-        warn("[NewServerHop] Не удалось определить JobId после телепортации")
-        return false
-    end
-
-    if newServerId == currentServerId or visitedServers[newServerId] then
-        warn("[NewServerHop] Вернулись на уже посещенный сервер " .. newServerId)
-        visitedServers[newServerId] = true
-        ServerHopSettings[newServerId] = { Time = tick() }
-        SaveServerHopSettings()
-        return false
-    else
-        print("[NewServerHop] Успешно подключился к новому серверу: " .. newServerId)
-        visitedServers[newServerId] = true
-        ServerHopSettings[newServerId] = { Time = tick() }
-        SaveServerHopSettings()
-        return true
-    end
+    warn("[NewServerHop] Не удалось выполнить телепортацию после " .. maxAttempts .. " попыток")
+    showNotification("Не удалось переподключиться. Проверьте сеть или перезапустите игру.", Color3.fromRGB(255, 0, 0))
+    return false
 end
 
+-- Функция цикла Server Hop с остановкой при фруктах
 local function startServerHop()
     print("[NewServerHop] Запуск цикла Server Hop")
     while serverHopEnabled do
+        -- Проверка фруктов перед задержкой
+        local fruits = findFruits()
+        if #fruits > 0 then
+            print("[NewServerHop] Обнаружено " .. #fruits .. " фруктов, приостанавливаю Server Hop")
+            while #findFruits() > 0 and serverHopEnabled do
+                task.wait(5)
+                print("[NewServerHop] Фрукты всё ещё присутствуют, жду...")
+            end
+            if not serverHopEnabled then
+                print("[NewServerHop] Server Hop выключен во время ожидания")
+                break
+            end
+            print("[NewServerHop] Фрукты исчезли, продолжаю Server Hop")
+        end
+
+        -- Оригинальная задержка 75 секунд
         print("[NewServerHop] Ожидаю 65 секунд перед следующей попыткой телепортации...")
-        task.wait(65)
+        task.wait(75)
+
         if serverHopEnabled then
             if game:IsLoaded() then
                 local success = false
                 while not success and serverHopEnabled do
+                    -- Проверка фруктов перед телепортацией
+                    if #findFruits() > 0 then
+                        print("[NewServerHop] Фрукт обнаружен перед телепортацией, жду...")
+                        while #findFruits() > 0 and serverHopEnabled do
+                            task.wait(5)
+                        end
+                        if not serverHopEnabled then break end
+                    end
+
                     print("[NewServerHop] Попытка найти новый сервер...")
                     success = serverHop()
                     if not success then
@@ -690,29 +874,7 @@ local function startServerHop()
         end
     end
     print("[NewServerHop] Цикл Server Hop остановлен")
-end
-
-if not getgenv().Loaded then
-    local function child(childinstance)
-        if childinstance.Name == "ErrorPrompt" then
-            childinstance:GetPropertyChangedSignal("Visible"):Connect(function()
-                if childinstance.Visible then
-                    if childinstance.TitleFrame.ErrorTitle.Text == "Teleport Failed" then
-                        warn("[NewServerHop] Телепортация не удалась, продолжаю пытаться")
-                    end
-                end
-            end)
-        end
-    end
-
-    for _, v in pairs(game.CoreGui.RobloxPromptGui.promptOverlay:GetChildren()) do
-        child(v)
-    end
-    game.CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(child)
-    getgenv().Loaded = true
-end
-
--- GUI с вкладками
+end-- GUI с вкладками
 local ScreenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
 ScreenGui.Name = "FruitCollectorGui"
 ScreenGui.ResetOnSpawn = false
