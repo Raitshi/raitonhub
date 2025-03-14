@@ -17,7 +17,7 @@ local autoStoreEnabled = false
 local serverHopEnabled = false
 local autoBuyEnabled = false
 local FlightSpeed = 300 -- Из второго скрипта
-local activeConnections = {} -- Из второго скрипта
+local activeConnections = {} -- Заменяем activeTweens на activeConnections
 local espCache = {}
 local lastPurchaseTime = nil
 local COOLDOWN_DURATION = 7200 -- 2 часа
@@ -26,8 +26,9 @@ local SAVE_FILE = "lastPurchaseTime_" .. player.UserId .. ".txt"
 
 local BLOX_FRUITS_PLACE_ID = 2753915549
 local visitedServers = {}
-local resetTime = 1200 -- 20 минут в секундах
-local waitTime = 10 -- 10 секунд перед хопом
+local ServerHopSettings = {}
+local ServerHopFileName = "bloxfruitsServerHop.json"
+local lastResetTime = tick()
 
 local wantedFruits = {
     ["Kilo Fruit"] = true, ["Spin Fruit"] = true, ["Chop Fruit"] = true, ["Sprint Fruit"] = true,
@@ -55,6 +56,7 @@ local function disableCollisions()
                 part.CanCollide = false
             end
         end
+        print("[Коллизии] Коллизии персонажа отключены")
     end
 end
 
@@ -65,6 +67,7 @@ local function enableCollisions()
                 part.CanCollide = true
             end
         end
+        print("[Коллизии] Коллизии персонажа включены")
     end
 end
 
@@ -225,6 +228,7 @@ local function stopAllConnections()
     end
     table.clear(activeConnections)
     enableCollisions()
+    print("[Телепорт] Все активные соединения остановлены, коллизии восстановлены")
 end
 
 local function storeFruit(fruit)
@@ -432,86 +436,131 @@ local function startAutoBuy()
     end
 end
 
--- Функция для сброса списка посещенных серверов
-spawn(function()
-    while true do
-        wait(resetTime)
-        visitedServers = {}
-    end
-end)
-
--- Функция для получения списка серверов
-local function getServers()
-    local servers = {}
-    local cursor = ""
-
-    repeat
-        local url = "https://games.roblox.com/v1/games/"..BLOX_FRUITS_PLACE_ID.."/servers/Public?sortOrder=Asc&limit=100"
-        if cursor ~= "" then
-            url = url .. "&cursor=" .. cursor
-        end
-        local response = game:HttpGet(url)
-        local data = HttpService:JSONDecode(response)
-
-        if data and data.data then
-            for _, server in ipairs(data.data) do
-                if server.playing < server.maxPlayers and not visitedServers[server.id] then
-                    table.insert(servers, server.id)
-                end
-            end
-        end
-
-        cursor = data.nextPageCursor or ""
-        wait(1)
-    until cursor == "" or #servers >= 1
-
-    return servers
+-- Server Hop логика
+local function SaveServerHopSettings()
+    writefile(ServerHopFileName, HttpService:JSONEncode(ServerHopSettings))
 end
 
--- Функция для попытки перехода на сервер
-local function attemptServerHop()
-    local fruit = findNearestFruit()
-    if fruit then
-        print("[ServerHop] Обнаружен фрукт, жду его сбора перед хопом")
-        while findNearestFruit() and serverHopEnabled do
-            task.wait(5)
-        end
-        if not serverHopEnabled then return end
+local function ReadServerHopSettings()
+    local s, e = pcall(function()
+        return HttpService:JSONDecode(readfile(ServerHopFileName))
+    end)
+    if s then
+        return e
+    else
+        SaveServerHopSettings()
+        return ReadServerHopSettings()
+    end
+end
+ServerHopSettings = ReadServerHopSettings()
+
+local function resetVisitedServers()
+    if tick() - lastResetTime >= 3600 then
+        print("[NewServerHop] Прошёл час, обнуляю список посещённых серверов")
+        visitedServers = {}
+        ServerHopSettings = {}
+        SaveServerHopSettings()
+        lastResetTime = tick()
+    end
+end
+
+local function serverHop()
+    print("[NewServerHop] Начало попытки телепортации")
+    local currentServerId = game.JobId or "unknown"
+    if currentServerId ~= "unknown" then
+        visitedServers[currentServerId] = true
+        ServerHopSettings[currentServerId] = { Time = tick() }
+        SaveServerHopSettings()
     end
 
-    local servers = getServers()
-    while #servers > 0 do
-        local newServer = servers[math.random(1, #servers)]
-        visitedServers[newServer] = true
+    if not game:IsLoaded() then
+        game.Loaded:Wait()
+    end
+    local player = Players.LocalPlayer
+    if not player or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+        return false
+    end
 
-        local success, err = pcall(function()
-            TeleportService:TeleportToPlaceInstance(BLOX_FRUITS_PLACE_ID, newServer, player)
+    local maxAttempts = 3
+    local attempt = 1
+
+    while attempt <= maxAttempts and serverHopEnabled do
+        local success, teleportError = pcall(function()
+            TeleportService:Teleport(BLOX_FRUITS_PLACE_ID, Players.LocalPlayer)
         end)
 
-        if success then
-            return
-        else
-            warn("[ServerHop] Не удалось подключиться к серверу: "..err)
-            table.remove(servers, table.find(servers, newServer))
+        if not success then
+            warn("[NewServerHop] Ошибка телепортации (попытка " .. attempt .. "): " .. tostring(teleportError))
+            attempt = attempt + 1
+            task.wait(30)
+            continue
         end
 
-        wait(1)
+        local loadTimeout = 40
+        local elapsed = 0
+        while elapsed < loadTimeout and not game:IsLoaded() do
+            task.wait(1)
+            elapsed = elapsed + 1
+        end
+
+        if not game:IsLoaded() then
+            attempt = attempt + 1
+            task.wait(30)
+            continue
+        end
+
+        local newServerId = game.JobId or "unknown"
+        if newServerId == "unknown" or newServerId == currentServerId then
+            attempt = attempt + 1
+            task.wait(30)
+            continue
+        else
+            visitedServers[newServerId] = true
+            ServerHopSettings[newServerId] = { Time = tick() }
+            SaveServerHopSettings()
+            return true
+        end
     end
 
-    warn("[ServerHop] Не найдено доступных серверов! Повтор через 5 секунд...")
-    wait(5)
-    attemptServerHop()
+    warn("[NewServerHop] Не удалось выполнить телепортацию после " .. maxAttempts .. " попыток")
+    return false
 end
 
--- Основной цикл Server Hop
 local function startServerHop()
     while serverHopEnabled do
-        wait(waitTime)
-        attemptServerHop()
+        local fruits = findNearestFruit()
+        if fruits then
+            print("[NewServerHop] Обнаружен фрукт, жду его сбора")
+            while findNearestFruit() and serverHopEnabled do
+                task.wait(5)
+            end
+            if not serverHopEnabled then break end
+        end
+
+        task.wait(75)
+        if serverHopEnabled then
+            if game:IsLoaded() then
+                local success = false
+                while not success and serverHopEnabled do
+                    if findNearestFruit() then
+                        while findNearestFruit() and serverHopEnabled do
+                            task.wait(5)
+                        end
+                        if not serverHopEnabled then break end
+                    end
+                    success = serverHop()
+                    if not success then
+                        task.wait(2)
+                    end
+                end
+            else
+                game.Loaded:Wait()
+            end
+        end
     end
 end
 
--- GUI с вкладками
+-- GUI с вкладками (Ваш исходный дизайн)
 local ScreenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
 ScreenGui.Name = "FruitCollectorGui"
 ScreenGui.ResetOnSpawn = false
@@ -526,9 +575,10 @@ Frame.BorderSizePixel = 0
 local FrameCorner = Instance.new("UICorner", Frame)
 FrameCorner.CornerRadius = UDim.new(0, 20)
 
-local minimizedFrame = Instance.new("TextButton", ScreenGui)
+local minimizedFrame
+minimizedFrame = Instance.new("TextButton", ScreenGui)
 minimizedFrame.Size = UDim2.new(0, 100, 0, 30)
-minimizedFrame.Position = UDim2.new(0.5, -50, 0.5, -15)
+minimizedFrame.Position = UDim2.new(0.5, -10, 0.5, -15)
 minimizedFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 minimizedFrame.TextColor3 = Color3.fromRGB(0, 0, 0)
 minimizedFrame.Font = Enum.Font.Code
@@ -536,45 +586,40 @@ minimizedFrame.TextSize = 14
 minimizedFrame.Text = "Открыть"
 minimizedFrame.Visible = false
 minimizedFrame.BorderSizePixel = 0
+minimizedFrame.ZIndex = 10
 local minimizedCorner = Instance.new("UICorner", minimizedFrame)
 minimizedCorner.CornerRadius = UDim.new(0, 15)
 
-local TabFrame = Instance.new("Frame", Frame)
-TabFrame.Size = UDim2.new(0, 60, 0, 120)
-TabFrame.Position = UDim2.new(1, -70, 0, 50)
-TabFrame.BackgroundTransparency = 1
-TabFrame.BorderSizePixel = 0
-
-local Tab1Button = Instance.new("TextButton", TabFrame)
-Tab1Button.Size = UDim2.new(0, 40, 0, 40)
-Tab1Button.Position = UDim2.new(0, 10, 0, 10)
-Tab1Button.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+local Tab1Button = Instance.new("TextButton", Frame)
+Tab1Button.Size = UDim2.new(0, 20, 0, 20)
+Tab1Button.Position = UDim2.new(1, -30, 0, 55)
+Tab1Button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 Tab1Button.TextColor3 = Color3.fromRGB(0, 0, 0)
 Tab1Button.Font = Enum.Font.Code
-Tab1Button.TextSize = 18
+Tab1Button.TextSize = 14
 Tab1Button.Text = "1"
 Tab1Button.BorderSizePixel = 0
 local Tab1Corner = Instance.new("UICorner", Tab1Button)
-Tab1Corner.CornerRadius = UDim.new(0, 20)
+Tab1Corner.CornerRadius = UDim.new(0, 5)
 
-local Tab2Button = Instance.new("TextButton", TabFrame)
-Tab2Button.Size = UDim2.new(0, 40, 0, 40)
-Tab2Button.Position = UDim2.new(0, 10, 0, 70)
-Tab2Button.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+local Tab2Button = Instance.new("TextButton", Frame)
+Tab2Button.Size = UDim2.new(0, 20, 0, 20)
+Tab2Button.Position = UDim2.new(1, -30, 0, 85)
+Tab2Button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 Tab2Button.TextColor3 = Color3.fromRGB(0, 0, 0)
 Tab2Button.Font = Enum.Font.Code
-Tab2Button.TextSize = 18
+Tab2Button.TextSize = 14
 Tab2Button.Text = "2"
 Tab2Button.BorderSizePixel = 0
 local Tab2Corner = Instance.new("UICorner", Tab2Button)
-Tab2Corner.CornerRadius = UDim.new(0, 20)
+Tab2Corner.CornerRadius = UDim.new(0, 5)
 
 local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local function animateTransparency(object, target)
     if object:IsA("GuiObject") then
         if object:IsA("ImageLabel") then
             TweenService:Create(object, tweenInfo, {ImageTransparency = target}):Play()
-        elseif object:IsA("TextButton") or object:IsA("Frame") then
+        elseif object:IsA("TextButton") or object:IsA("TextLabel") then
             TweenService:Create(object, tweenInfo, {BackgroundTransparency = target, TextTransparency = target}):Play()
         end
     end
@@ -586,39 +631,102 @@ end
 local function openFrame()
     Frame.Visible = true
     animateTransparency(Frame, 0)
+    for _, button in pairs(Frame:GetChildren()) do
+        if button:IsA("TextButton") and button ~= Tab1Button and button ~= Tab2Button then
+            for _, child in pairs(button:GetChildren()) do
+                if child:IsA("Frame") then
+                    if child.Name == "Toggle" then
+                        TweenService:Create(child, tweenInfo, {BackgroundTransparency = 0}):Play()
+                    elseif child.Name == "Fill" then
+                        TweenService:Create(child, tweenInfo, {BackgroundTransparency = child.Size.X.Offset > 0 and 0 or 0.5}):Play()
+                    end
+                end
+            end
+        end
+    end
 end
 
 local function closeFrame()
+    local lastFramePosition = Frame.Position
     animateTransparency(Frame, 1)
+    for _, button in pairs(Frame:GetChildren()) do
+        if button:IsA("TextButton") then
+            for _, child in pairs(button:GetChildren()) do
+                if child:IsA("Frame") then
+                    if child.Name == "Toggle" or child.Name == "Fill" then
+                        TweenService:Create(child, tweenInfo, {BackgroundTransparency = 1}):Play()
+                    end
+                end
+            end
+        end
+    end
     local tween = TweenService:Create(Frame, tweenInfo, {ImageTransparency = 1})
     tween.Completed:Connect(function()
         Frame.Visible = false
-        minimizedFrame.Visible = true
-        TweenService:Create(minimizedFrame, tweenInfo, {BackgroundTransparency = 0, TextTransparency = 0}):Play()
+        if minimizedFrame then
+            minimizedFrame.Position = lastFramePosition
+            minimizedFrame.Visible = true
+            minimizedFrame.BackgroundTransparency = 1
+            minimizedFrame.TextTransparency = 1
+            TweenService:Create(minimizedFrame, tweenInfo, {BackgroundTransparency = 0, TextTransparency = 0}):Play()
+        end
     end)
     tween:Play()
 end
 
+local dragging, dragInput, dragStart, startPos
 Frame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        local dragging = true
-        local dragStart = input.Position
-        local startPos = Frame.Position
+        dragging = true
+        dragStart = input.Position
+        startPos = Frame.Position
         input.Changed:Connect(function()
             if input.UserInputState == Enum.UserInputState.End then dragging = false end
         end)
-        UserInputService.InputChanged:Connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                local delta = input.Position - dragStart
-                Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-            end
+    end
+end)
+Frame.InputChanged:Connect(function(input) 
+    if input.UserInputType == Enum.UserInputType.MouseMovement then 
+        dragInput = input 
+    end 
+end)
+
+local minimizedDragging, minimizedDragInput, minimizedDragStart, minimizedStartPos
+minimizedFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        minimizedDragging = true
+        minimizedDragStart = input.Position
+        minimizedStartPos = minimizedFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then minimizedDragging = false end
         end)
     end
 end)
+minimizedFrame.InputChanged:Connect(function(input) 
+    if input.UserInputType == Enum.UserInputType.MouseMovement then 
+        minimizedDragInput = input 
+    end 
+end)
 
-minimizedFrame.MouseButton1Click:Connect(function()
-    minimizedFrame.Visible = false
-    openFrame()
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then
+        local delta = input.Position - dragStart
+        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    if minimizedDragging and input == minimizedDragInput then
+        if minimizedFrame then
+            local delta = input.Position - minimizedDragStart
+            minimizedFrame.Position = UDim2.new(minimizedStartPos.X.Scale, minimizedStartPos.X.Offset + delta.X, minimizedStartPos.Y.Scale, minimizedStartPos.Y.Offset + delta.Y)
+        end
+    end
+end)
+
+minimizedFrame.MouseButton1Click:Connect(function() 
+    if minimizedFrame then
+        minimizedFrame.Visible = false
+        Frame.Position = minimizedFrame.Position
+        openFrame()
+    end
 end)
 
 local closeButton = Instance.new("TextButton", Frame)
@@ -634,10 +742,51 @@ closeButton.BackgroundTransparency = 1
 local closeCorner = Instance.new("UICorner", closeButton)
 closeCorner.CornerRadius = UDim.new(0, 15)
 
-closeButton.MouseButton1Click:Connect(function()
+local minimizeButton = Instance.new("TextButton", Frame)
+minimizeButton.Size = UDim2.new(0, 30, 0, 30)
+minimizeButton.Position = UDim2.new(1, -80, 0, 10)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+minimizeButton.Font = Enum.Font.Code
+minimizeButton.TextSize = 14
+minimizeButton.Text = "-"
+minimizeButton.BorderSizePixel = 0
+minimizeButton.BackgroundTransparency = 1
+local minimizeCorner = Instance.new("UICorner", minimizeButton)
+minimizeCorner.CornerRadius = UDim.new(0, 15)
+
+minimizeButton.MouseButton1Click:Connect(function() 
+    if Frame.Visible then 
+        closeFrame()
+    end 
+end)
+closeButton.MouseButton1Click:Connect(function() 
     closeFrame()
+    if minimizedFrame then
+        minimizedFrame.Visible = false
+    end
     ScreenGui:Destroy()
 end)
+
+local fileName = "FruitCollectorSettings.json"
+
+local function saveSettings(settings)
+    local json = HttpService:JSONEncode(settings)
+    writefile(fileName, json)
+end
+
+local function loadSettings()
+    if isfile(fileName) then
+        local json = readfile(fileName)
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(json)
+        end)
+        if success then return result end
+    end
+    return {["Teleport Fruit"] = false, ["ESP Fruit"] = false, ["Auto Store Fruit"] = false, ["Server Hop"] = false, ["Auto Buy Fruit"] = false}
+end
+
+local savedSettings = loadSettings()
 
 local function createToggleButton(text, posY, callback)
     local Button = Instance.new("TextButton", Frame)
@@ -661,7 +810,7 @@ local function createToggleButton(text, posY, callback)
     Fill.BackgroundTransparency = 0.5
     Fill.BorderSizePixel = 0
     local FillCorner = Instance.new("UICorner", Fill)
-    FillCorner.CornerRadius = UDim.new(0, 10)
+    FillCorner.CornerRadius = UDim.new(1, 0)
     local Toggle = Instance.new("Frame", Button)
     Toggle.Name = "Toggle"
     Toggle.Size = UDim2.new(0, 20, 0, 20)
@@ -669,34 +818,51 @@ local function createToggleButton(text, posY, callback)
     Toggle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     Toggle.BorderSizePixel = 0
     local ToggleCorner = Instance.new("UICorner", Toggle)
-    ToggleCorner.CornerRadius = UDim.new(0, 10)
+    ToggleCorner.CornerRadius = UDim.new(1, 0)
+    local isOn = savedSettings[text] or false
+    local buttonTweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+    if isOn then
+        Fill.Size = UDim2.new(0, 50, 0, 20)
+        Toggle.Position = UDim2.new(1, -25, 0.5, -10)
+        Fill.BackgroundTransparency = 0
+        callback(true)
+    end
 
     Button.MouseButton1Click:Connect(function()
-        local isOn = Fill.Size.X.Offset == 0
+        isOn = not isOn
         if isOn then
             Fill:TweenSize(UDim2.new(0, 50, 0, 20), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
             Toggle:TweenPosition(UDim2.new(1, -25, 0.5, -10), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
-            TweenService:Create(Fill, TweenInfo.new(0.2), {BackgroundTransparency = 0}):Play()
+            TweenService:Create(Fill, buttonTweenInfo, {BackgroundTransparency = 0}):Play()
+            if text == "Teleport Fruit" then
+                disableCollisions()
+            end
         else
             Fill:TweenSize(UDim2.new(0, 0, 0, 20), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
             Toggle:TweenPosition(UDim2.new(1, -55, 0.5, -10), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
-            TweenService:Create(Fill, TweenInfo.new(0.2), {BackgroundTransparency = 0.5}):Play()
+            TweenService:Create(Fill, buttonTweenInfo, {BackgroundTransparency = 0.5}):Play()
+            if text == "Teleport Fruit" then
+                stopAllConnections()
+            end
         end
-        callback(not isOn)
+        callback(isOn)
+        savedSettings[text] = isOn
+        saveSettings(savedSettings)
     end)
     return Button
 end
 
 local tab1Buttons = {
-    createToggleButton("Teleport Fruit", 50, function(isOn)
+    {text = "Teleport Fruit", posY = 50, callback = function(isOn)
         collectingEnabled = isOn
         if isOn then
             task.spawn(startAutoCollect)
         else
             stopAllConnections()
         end
-    end),
-    createToggleButton("ESP Fruit", 90, function(isOn)
+    end},
+    {text = "ESP Fruit", posY = 90, callback = function(isOn)
         if isOn then
             local fruit = findNearestFruit()
             if fruit then createESP(fruit) end
@@ -711,55 +877,75 @@ local tab1Buttons = {
         else
             disableESP()
         end
-    end),
-    createToggleButton("Auto Store Fruit", 130, function(isOn)
+    end},
+    {text = "Auto Store Fruit", posY = 130, callback = function(isOn)
         autoStoreEnabled = isOn
         if isOn then
             task.spawn(startAutoStore)
         end
-    end),
-    createToggleButton("Server Hop", 170, function(isOn)
+    end},
+    {text = "Server Hop", posY = 170, callback = function(isOn)
         serverHopEnabled = isOn
         if isOn then
             task.spawn(startServerHop)
         end
-    end)
+    end}
 }
 
 local tab2Buttons = {
-    createToggleButton("Auto Buy Fruit", 50, function(isOn)
+    {text = "Auto Buy Fruit", posY = 50, callback = function(isOn)
         autoBuyEnabled = isOn
         if isOn then
             task.spawn(startAutoBuy)
         end
-    end)
+    end}
 }
+
+local allButtons = {}
+for _, btn in pairs(tab1Buttons) do
+    local button = createToggleButton(btn.text, btn.posY, btn.callback)
+    table.insert(allButtons, button)
+end
+for _, btn in pairs(tab2Buttons) do
+    local button = createToggleButton(btn.text, btn.posY, btn.callback)
+    button.Visible = false
+    table.insert(allButtons, button)
+end
 
 Tab1Button.MouseButton1Click:Connect(function()
     Tab1Button.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     Tab2Button.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-    for _, button in pairs(tab1Buttons) do
-        button.Visible = true
-    end
-    for _, button in pairs(tab2Buttons) do
-        button.Visible = false
+    for i, button in pairs(allButtons) do
+        button.Visible = (i <= #tab1Buttons)
     end
 end)
 
 Tab2Button.MouseButton1Click:Connect(function()
     Tab1Button.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
     Tab2Button.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    for _, button in pairs(tab1Buttons) do
-        button.Visible = false
-    end
-    for _, button in pairs(tab2Buttons) do
-        button.Visible = true
+    for i, button in pairs(allButtons) do
+        button.Visible = (i > #tab1Buttons)
     end
 end)
 
--- Изначально показываем первую вкладку
-for _, button in pairs(tab2Buttons) do
-    button.Visible = false
-end
+local TitleLabel = Instance.new("ImageLabel")
+TitleLabel.Name = "TitleLabel"
+TitleLabel.Size = UDim2.new(0, 100, 0, 20)
+TitleLabel.Position = UDim2.new(0, 10, 0, 5)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.ImageTransparency = 0
+TitleLabel.BorderSizePixel = 0
+TitleLabel.ZIndex = 2
+TitleLabel.Parent = Frame
+
+local TitleText = Instance.new("ImageLabel")
+TitleText.Name = "TitleText"
+TitleText.Size = UDim2.new(0, 100, 0, 20)
+TitleText.Position = UDim2.new(0, 0, 0, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.ImageTransparency = 0
+TitleText.Image = "rbxassetid://101220483366180"
+TitleText.ZIndex = 3
+TitleText.Parent = TitleLabel
 
 openFrame()
