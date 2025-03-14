@@ -7,6 +7,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
+local VirtualUser = game:GetService("VirtualUser")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -16,8 +17,9 @@ local collectingEnabled = false
 local autoStoreEnabled = false
 local serverHopEnabled = false
 local autoBuyEnabled = false
-local FlightSpeed = 300 -- Из второго скрипта
-local activeConnections = {} -- Заменяем activeTweens на activeConnections
+local antiAfkEnabled = false -- Новая переменная для анти-АФК
+local FlightSpeed = 300
+local activeConnections = {}
 local espCache = {}
 local lastPurchaseTime = nil
 local COOLDOWN_DURATION = 7200 -- 2 часа
@@ -287,9 +289,7 @@ local function loadLastPurchaseTime()
     if isfile(SAVE_FILE) then
         local content = readfile(SAVE_FILE)
         local time = tonumber(content)
-        if time then
-            return time
-        end
+        if time then return time end
     end
     return nil
 end
@@ -315,15 +315,9 @@ local function getBeli()
 end
 
 local function canBuyFruit()
-    if not lastPurchaseTime then
-        return true
-    end
+    if not lastPurchaseTime then return true end
     local timeSinceLastPurchase = tick() - lastPurchaseTime
-    if timeSinceLastPurchase >= COOLDOWN_DURATION then
-        return true
-    else
-        return false
-    end
+    return timeSinceLastPurchase >= COOLDOWN_DURATION
 end
 
 local function showNotification(message, color)
@@ -445,12 +439,7 @@ local function ReadServerHopSettings()
     local s, e = pcall(function()
         return HttpService:JSONDecode(readfile(ServerHopFileName))
     end)
-    if s then
-        return e
-    else
-        SaveServerHopSettings()
-        return ReadServerHopSettings()
-    end
+    if s then return e else SaveServerHopSettings() return ReadServerHopSettings() end
 end
 ServerHopSettings = ReadServerHopSettings()
 
@@ -473,13 +462,9 @@ local function serverHop()
         SaveServerHopSettings()
     end
 
-    if not game:IsLoaded() then
-        game.Loaded:Wait()
-    end
+    if not game:IsLoaded() then game.Loaded:Wait() end
     local player = Players.LocalPlayer
-    if not player or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
-        return false
-    end
+    if not player or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return false end
 
     local maxAttempts = 3
     local attempt = 1
@@ -531,9 +516,7 @@ local function startServerHop()
         local fruits = findNearestFruit()
         if fruits then
             print("[NewServerHop] Обнаружен фрукт, жду его сбора")
-            while findNearestFruit() and serverHopEnabled do
-                task.wait(5)
-            end
+            while findNearestFruit() and serverHopEnabled do task.wait(5) end
             if not serverHopEnabled then break end
         end
 
@@ -543,15 +526,11 @@ local function startServerHop()
                 local success = false
                 while not success and serverHopEnabled do
                     if findNearestFruit() then
-                        while findNearestFruit() and serverHopEnabled do
-                            task.wait(5)
-                        end
+                        while findNearestFruit() and serverHopEnabled do task.wait(5) end
                         if not serverHopEnabled then break end
                     end
                     success = serverHop()
-                    if not success then
-                        task.wait(2)
-                    end
+                    if not success then task.wait(2) end
                 end
             else
                 game.Loaded:Wait()
@@ -560,7 +539,27 @@ local function startServerHop()
     end
 end
 
--- GUI с вкладками (Ваш исходный дизайн)
+-- Анти-АФК логика
+local antiAfkConnection
+local function startAntiAfk()
+    if antiAfkConnection then antiAfkConnection:Disconnect() end
+    antiAfkConnection = player.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+        print("[Anti-AFK] Симулирован клик для предотвращения AFK")
+    end)
+    print("[Anti-AFK] Анти-АФК включён")
+end
+
+local function stopAntiAfk()
+    if antiAfkConnection then
+        antiAfkConnection:Disconnect()
+        antiAfkConnection = nil
+        print("[Anti-AFK] Анти-АФК отключён")
+    end
+end
+
+-- GUI с вкладками
 local ScreenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
 ScreenGui.Name = "FruitCollectorGui"
 ScreenGui.ResetOnSpawn = false
@@ -686,9 +685,7 @@ Frame.InputBegan:Connect(function(input)
     end
 end)
 Frame.InputChanged:Connect(function(input) 
-    if input.UserInputType == Enum.UserInputType.MouseMovement then 
-        dragInput = input 
-    end 
+    if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end 
 end)
 
 local minimizedDragging, minimizedDragInput, minimizedDragStart, minimizedStartPos
@@ -703,9 +700,7 @@ minimizedFrame.InputBegan:Connect(function(input)
     end
 end)
 minimizedFrame.InputChanged:Connect(function(input) 
-    if input.UserInputType == Enum.UserInputType.MouseMovement then 
-        minimizedDragInput = input 
-    end 
+    if input.UserInputType == Enum.UserInputType.MouseMovement then minimizedDragInput = input end 
 end)
 
 UserInputService.InputChanged:Connect(function(input)
@@ -756,15 +751,11 @@ local minimizeCorner = Instance.new("UICorner", minimizeButton)
 minimizeCorner.CornerRadius = UDim.new(0, 15)
 
 minimizeButton.MouseButton1Click:Connect(function() 
-    if Frame.Visible then 
-        closeFrame()
-    end 
+    if Frame.Visible then closeFrame() end 
 end)
 closeButton.MouseButton1Click:Connect(function() 
     closeFrame()
-    if minimizedFrame then
-        minimizedFrame.Visible = false
-    end
+    if minimizedFrame then minimizedFrame.Visible = false end
     ScreenGui:Destroy()
 end)
 
@@ -783,7 +774,7 @@ local function loadSettings()
         end)
         if success then return result end
     end
-    return {["Teleport Fruit"] = false, ["ESP Fruit"] = false, ["Auto Store Fruit"] = false, ["Server Hop"] = false, ["Auto Buy Fruit"] = false}
+    return {["Teleport Fruit"] = false, ["ESP Fruit"] = false, ["Auto Store Fruit"] = false, ["Server Hop"] = false, ["Auto Buy Fruit"] = false, ["Anti AFK"] = false}
 end
 
 local savedSettings = loadSettings()
@@ -835,16 +826,12 @@ local function createToggleButton(text, posY, callback)
             Fill:TweenSize(UDim2.new(0, 50, 0, 20), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
             Toggle:TweenPosition(UDim2.new(1, -25, 0.5, -10), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
             TweenService:Create(Fill, buttonTweenInfo, {BackgroundTransparency = 0}):Play()
-            if text == "Teleport Fruit" then
-                disableCollisions()
-            end
+            if text == "Teleport Fruit" then disableCollisions() end
         else
             Fill:TweenSize(UDim2.new(0, 0, 0, 20), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
             Toggle:TweenPosition(UDim2.new(1, -55, 0.5, -10), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
             TweenService:Create(Fill, buttonTweenInfo, {BackgroundTransparency = 0.5}):Play()
-            if text == "Teleport Fruit" then
-                stopAllConnections()
-            end
+            if text == "Teleport Fruit" then stopAllConnections() end
         end
         callback(isOn)
         savedSettings[text] = isOn
@@ -856,11 +843,7 @@ end
 local tab1Buttons = {
     {text = "Teleport Fruit", posY = 50, callback = function(isOn)
         collectingEnabled = isOn
-        if isOn then
-            task.spawn(startAutoCollect)
-        else
-            stopAllConnections()
-        end
+        if isOn then task.spawn(startAutoCollect) else stopAllConnections() end
     end},
     {text = "ESP Fruit", posY = 90, callback = function(isOn)
         if isOn then
@@ -869,9 +852,7 @@ local tab1Buttons = {
             Workspace.DescendantAdded:Connect(function(child)
                 if isOn and (child:IsA("Tool") or child:IsA("Model")) then
                     local handle = child:FindFirstChild("Handle") or child:FindFirstChildOfClass("Part") or child:FindFirstChildOfClass("MeshPart")
-                    if handle and handle:FindFirstChild("TouchInterest") then
-                        createESP(child)
-                    end
+                    if handle and handle:FindFirstChild("TouchInterest") then createESP(child) end
                 end
             end)
         else
@@ -880,24 +861,22 @@ local tab1Buttons = {
     end},
     {text = "Auto Store Fruit", posY = 130, callback = function(isOn)
         autoStoreEnabled = isOn
-        if isOn then
-            task.spawn(startAutoStore)
-        end
+        if isOn then task.spawn(startAutoStore) end
     end},
     {text = "Server Hop", posY = 170, callback = function(isOn)
         serverHopEnabled = isOn
-        if isOn then
-            task.spawn(startServerHop)
-        end
+        if isOn then task.spawn(startServerHop) end
     end}
 }
 
 local tab2Buttons = {
     {text = "Auto Buy Fruit", posY = 50, callback = function(isOn)
         autoBuyEnabled = isOn
-        if isOn then
-            task.spawn(startAutoBuy)
-        end
+        if isOn then task.spawn(startAutoBuy) end
+    end},
+    {text = "Anti AFK", posY = 90, callback = function(isOn)
+        antiAfkEnabled = isOn
+        if isOn then startAntiAfk() else stopAntiAfk() end
     end}
 }
 
