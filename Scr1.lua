@@ -299,7 +299,7 @@ local function createGUI()
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 300, 0, 200)
     frame.Position = UDim2.new(0.5, -150, 0.5, -100)
-    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Полностью чёрный фон
     frame.BackgroundTransparency = 0
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
@@ -313,7 +313,7 @@ local function createGUI()
     title.Position = UDim2.new(0, 10, 0, 10)
     title.BackgroundTransparency = 1
     title.Text = "Key Verification"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextColor3 = Color3.fromRGB(255, 255, 255) -- Белый текст для контраста
     title.Font = Enum.Font.SourceSansBold
     title.TextSize = 20
     title.Parent = frame
@@ -321,8 +321,8 @@ local function createGUI()
     local keyInput = Instance.new("TextBox")
     keyInput.Size = UDim2.new(0, 260, 0, 30)
     keyInput.Position = UDim2.new(0, 20, 0, 50)
-    keyInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-    keyInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+    keyInput.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Белое поле для ввода
+    keyInput.TextColor3 = Color3.fromRGB(0, 0, 0) -- Чёрный текст внутри поля
     keyInput.PlaceholderText = "Enter your key..."
     keyInput.Text = ""
     keyInput.Font = Enum.Font.SourceSans
@@ -335,28 +335,43 @@ local function createGUI()
     local useButton = Instance.new("TextButton")
     useButton.Size = UDim2.new(0, 100, 0, 30)
     useButton.Position = UDim2.new(0, 20, 0, 150)
-    useButton.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-    useButton.Text = "Use Key"
-    useButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    useButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Белая кнопка Use Key
+    useButton.TextColor3 = Color3.fromRGB(0, 0, 0) -- Чёрный текст
     useButton.Font = Enum.Font.SourceSansBold
     useButton.TextSize = 16
+    useButton.Text = "Use Key"
     useButton.Parent = frame
     local useCorner = Instance.new("UICorner")
     useCorner.CornerRadius = UDim.new(0, 5)
     useCorner.Parent = useButton
 
-    local copyButton = Instance.new("TextButton")
-    copyButton.Size = UDim2.new(0, 100, 0, 30)
-    copyButton.Position = UDim2.new(0, 180, 0, 150)
-    copyButton.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    copyButton.Text = "Copy Link"
-    copyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    copyButton.Font = Enum.Font.SourceSansBold
-    copyButton.TextSize = 16
-    copyButton.Parent = frame
-    local copyCorner = Instance.new("UICorner")
-    copyCorner.CornerRadius = UDim.new(0, 5)
-    copyCorner.Parent = copyButton
+    local closeButton = Instance.new("TextButton")
+    closeButton.Size = UDim2.new(0, 30, 0, 30)
+    closeButton.Position = UDim2.new(1, -40, 0, 10)
+    closeButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Белый фон кнопки
+    closeButton.TextColor3 = Color3.fromRGB(255, 0, 0) -- Красный текст
+    closeButton.Font = Enum.Font.SourceSansBold
+    closeButton.TextSize = 16
+    closeButton.Text = "X"
+    closeButton.BorderSizePixel = 0
+    closeButton.Parent = frame
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 15)
+    closeCorner.Parent = closeButton
+
+    -- Анимация при наведении и клике для кнопки Close
+    closeButton.MouseEnter:Connect(function()
+        TweenService:Create(closeButton, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(200, 200, 200)}):Play()
+    end)
+    closeButton.MouseLeave:Connect(function()
+        TweenService:Create(closeButton, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
+    end)
+    closeButton.MouseButton1Click:Connect(function()
+        TweenService:Create(closeButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(150, 150, 150)}):Play()
+        task.wait(0.1)
+        TweenService:Create(closeButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
+        screenGui:Destroy()
+    end)
 
     useButton.MouseButton1Click:Connect(function()
         local key = keyInput.Text
@@ -368,15 +383,11 @@ local function createGUI()
         if success and isValid then
             onMessage("Key verified!")
             screenGui:Destroy()
-            saveKey(key) -- Исправленный вызов
+            saveKey(key)
             runMainScript()
         else
-            onMessage("Invalid key! Copy new link.")
+            onMessage("Invalid key!")
         end
-    end)
-
-    copyButton.MouseButton1Click:Connect(function()
-        copyLink()
     end)
 end
 
