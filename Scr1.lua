@@ -334,7 +334,7 @@ local function createGUI()
 
     local useButton = Instance.new("TextButton")
     useButton.Size = UDim2.new(0, 100, 0, 30)
-    useButton.Position = UDim2.new(0, 20, 0, 150)
+    useButton.Position = UDim2.new(0, 40, 0, 150)
     useButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Белая кнопка Use Key
     useButton.TextColor3 = Color3.fromRGB(0, 0, 0) -- Чёрный текст
     useButton.Font = Enum.Font.SourceSansBold
