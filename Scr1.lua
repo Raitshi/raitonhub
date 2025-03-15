@@ -334,7 +334,7 @@ local function createGUI()
 
     local useButton = Instance.new("TextButton")
     useButton.Size = UDim2.new(0, 100, 0, 30)
-    useButton.Position = UDim2.new(0, 40, 0, 150)
+    useButton.Position = UDim2.new(0, 100, 0, 150) -- Перемещаем в середину (300 - 100) / 2 = 100
     useButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Белая кнопка Use Key
     useButton.TextColor3 = Color3.fromRGB(0, 0, 0) -- Чёрный текст
     useButton.Font = Enum.Font.SourceSansBold
@@ -370,7 +370,9 @@ local function createGUI()
         TweenService:Create(closeButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(150, 150, 150)}):Play()
         task.wait(0.1)
         TweenService:Create(closeButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
-        screenGui:Destroy()
+        frame.Visible = false -- Скрываем frame
+        screenGui:Destroy() -- Уничтожаем ScreenGui
+        return -- Прерываем выполнение функции
     end)
 
     useButton.MouseButton1Click:Connect(function()
@@ -387,7 +389,7 @@ local function createGUI()
             runMainScript()
         else
             onMessage("Invalid key!")
-        end
+        end)
     end)
 end
 
