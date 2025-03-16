@@ -61,6 +61,7 @@ if not playerGui then
     onMessage("Error: PlayerGui not found")
     return
 end
+print("playerGui found:", playerGui)
 
 local fSetClipboard, fRequest, fStringChar, fToString, fStringSub, fOsTime, fMathRandom, fMathFloor, fGetHwid = 
     setclipboard or toclipboard, 
@@ -92,8 +93,18 @@ function cacheLink()
             Headers = {["Content-Type"] = "application/json"}
         })
         if response and response.StatusCode then
+            print("Response StatusCode:", response.StatusCode)
+            print("Response Body:", response.Body)
             if response.StatusCode == 200 then
-                local decoded = lDecode(response.Body)
+                local decoded
+                local success, err = pcall(function()
+                    decoded = lDecode(response.Body)
+                end)
+                if not success then
+                    onMessage("Failed to parse server response: " .. tostring(err))
+                    print("Failed to parse JSON:", err)
+                    return false, "Failed to parse response"
+                end
                 if decoded.success then
                     cachedLink = decoded.data.url
                     cachedTime = fOsTime()
@@ -295,14 +306,16 @@ local function createGUI()
     screenGui.Parent = playerGui
     screenGui.ResetOnSpawn = false
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    print("screenGui created:", screenGui)
 
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 300, 0, 200)
     frame.Position = UDim2.new(0.5, -150, 0.5, -100)
-    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Полностью чёрный фон
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     frame.BackgroundTransparency = 0
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
+    print("frame created:", frame)
 
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 10)
@@ -313,7 +326,7 @@ local function createGUI()
     title.Position = UDim2.new(0, 10, 0, 10)
     title.BackgroundTransparency = 1
     title.Text = "Key Verification"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255) -- Белый текст для контраста
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.Font = Enum.Font.SourceSansBold
     title.TextSize = 20
     title.Parent = frame
@@ -321,8 +334,8 @@ local function createGUI()
     local keyInput = Instance.new("TextBox")
     keyInput.Size = UDim2.new(0, 260, 0, 30)
     keyInput.Position = UDim2.new(0, 20, 0, 50)
-    keyInput.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Белое поле для ввода
-    keyInput.TextColor3 = Color3.fromRGB(0, 0, 0) -- Чёрный текст внутри поля
+    keyInput.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    keyInput.TextColor3 = Color3.fromRGB(0, 0, 0)
     keyInput.PlaceholderText = "Enter your key..."
     keyInput.Text = ""
     keyInput.Font = Enum.Font.SourceSans
@@ -334,9 +347,9 @@ local function createGUI()
 
     local useButton = Instance.new("TextButton")
     useButton.Size = UDim2.new(0, 100, 0, 30)
-    useButton.Position = UDim2.new(0, 100, 0, 150) -- Перемещаем в середину (300 - 100) / 2 = 100
-    useButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Белая кнопка Use Key
-    useButton.TextColor3 = Color3.fromRGB(0, 0, 0) -- Чёрный текст
+    useButton.Position = UDim2.new(0, 100, 0, 150)
+    useButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    useButton.TextColor3 = Color3.fromRGB(0, 0, 0)
     useButton.Font = Enum.Font.SourceSansBold
     useButton.TextSize = 16
     useButton.Text = "Use Key"
@@ -348,8 +361,8 @@ local function createGUI()
     local closeButton = Instance.new("TextButton")
     closeButton.Size = UDim2.new(0, 30, 0, 30)
     closeButton.Position = UDim2.new(1, -40, 0, 10)
-    closeButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Белый фон кнопки
-    closeButton.TextColor3 = Color3.fromRGB(255, 0, 0) -- Красный текст
+    closeButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.TextColor3 = Color3.fromRGB(255, 0, 0)
     closeButton.Font = Enum.Font.SourceSansBold
     closeButton.TextSize = 16
     closeButton.Text = "X"
@@ -359,38 +372,39 @@ local function createGUI()
     closeCorner.CornerRadius = UDim.new(0, 15)
     closeCorner.Parent = closeButton
 
-    -- Анимация при наведении и клике для кнопки Close
-    closeButton.MouseEnter:Connect(function()
-        TweenService:Create(closeButton, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(200, 200, 200)}):Play()
-    end)
-    closeButton.MouseLeave:Connect(function()
-        TweenService:Create(closeButton, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
-    end)
-    closeButton.MouseButton1Click:Connect(function()
-        TweenService:Create(closeButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(150, 150, 150)}):Play()
-        task.wait(0.1)
-        TweenService:Create(closeButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
-        frame.Visible = false -- Скрываем frame
-        screenGui:Destroy() -- Уничтожаем ScreenGui
-        return -- Прерываем выполнение функции
-    end)
-
-    useButton.MouseButton1Click:Connect(function()
-        local key = keyInput.Text
-        if key == "" then
-            onMessage("Enter a key first!")
-            return
-        end
-        local success, isValid = pcall(verifyKey, key)
-        if success and isValid then
-            onMessage("Key verified!")
-            screenGui:Destroy()
-            saveKey(key)
-            runMainScript()
-        else
-            onMessage("Invalid key!")
+    print("useButton created:", useButton)
+    if useButton then
+        useButton.MouseButton1Click:Connect(function()
+            print("Use button clicked")
+            local key = keyInput.Text
+            if key == "" then
+                onMessage("Enter a key first!")
+                return
+            end
+            local success, isValid = pcall(verifyKey, key)
+            if success and isValid then
+                onMessage("Key verified!")
+                screenGui:Destroy()
+                saveKey(key)
+                runMainScript()
+            else
+                onMessage("Invalid key!")
+            end
         end)
-    end)
+    else
+        warn("useButton is nil, cannot attach MouseButton1Click event")
+    end
+
+    print("closeButton created:", closeButton)
+    if closeButton then
+        closeButton.MouseButton1Click:Connect(function()
+            print("Close button clicked")
+            frame.Visible = false
+            screenGui:Destroy()
+        end)
+    else
+        warn("closeButton is nil, cannot attach MouseButton1Click event")
+    end
 end
 
 local function runMainScript()
@@ -443,9 +457,9 @@ local function runMainScript()
         ["Paw Fruit"] = true, ["Blizzard Fruit"] = true, ["Gravity Fruit"] = true, ["Dough Fruit"] = true,
         ["Shadow Fruit"] = true, ["Venom Fruit"] = true, ["Control Fruit"] = true, ["Spirit Fruit"] = true,
         ["Dragon Fruit"] = true, ["Leopard Fruit"] = true, ["Kitsune Fruit"] = true, ["T-Rex Fruit"] = true,
-        ["Mammoth Fruit"] = true, ["Gas Fruit"] = true, ["Yeti Fruit"] = true
+        ["Mammoth Fruit"] = true, ["Gas Fruit"] = true, ["Yeti Fruit"] = true, ["Blade Fruit"] = true,
+        ["Rocket Fruit"] = true, ["Ghost Fruit"] = true, ['Love Fruit'] = true
     }
-
     player.CharacterAdded:Connect(function(newChar)
         character = newChar
         hrp = newChar:WaitForChild("HumanoidRootPart", 10)
@@ -543,7 +557,7 @@ local function runMainScript()
     local function findNearestFruit()
         local fruits = {}
         for _, obj in pairs(Workspace:GetChildren()) do
-            if obj:IsA("Tool") or obj:IsA("Model") then
+            if (obj:IsA("Tool") or obj:IsA("Model")) and wantedFruits[obj.Name] then
                 local handle = obj:FindFirstChild("Handle") or obj:FindFirstChildOfClass("Part") or obj:FindFirstChildOfClass("MeshPart")
                 if handle and handle:FindFirstChild("TouchInterest") then
                     local distance = (hrp.Position - handle.Position).Magnitude
@@ -762,11 +776,7 @@ local function runMainScript()
         end
 
         NotificationFrame.Visible = true
-        TweenService:Create(NotificationFrame, TweenInfo.new(0.5), {Position = UDim2.new(0, 10, 0, 70)}):Play()
-        
         task.delay(NOTIFICATION_DURATION, function()
-            TweenService:Create(NotificationFrame, TweenInfo.new(0.5), {Position = UDim2.new(0, 10, 0, 10)}):Play()
-            task.wait(0.5)
             NotificationFrame.Visible = false
         end)
     end
@@ -1027,9 +1037,10 @@ local function runMainScript()
     local function animateTransparency(object, target)
         if object:IsA("GuiObject") then
             if object:IsA("ImageLabel") then
-                TweenService:Create(object, tweenInfo, {ImageTransparency = target}):Play()
+                object.ImageTransparency = target
             elseif object:IsA("TextButton") or object:IsA("TextLabel") then
-                TweenService:Create(object, tweenInfo, {BackgroundTransparency = target, TextTransparency = target}):Play()
+                object.BackgroundTransparency = target
+                object.TextTransparency = target
             end
         end
         for _, child in pairs(object:GetChildren()) do
@@ -1045,9 +1056,9 @@ local function runMainScript()
                 for _, child in pairs(button:GetChildren()) do
                     if child:IsA("Frame") then
                         if child.Name == "Toggle" then
-                            TweenService:Create(child, tweenInfo, {BackgroundTransparency = 0}):Play()
+                            child.BackgroundTransparency = 0
                         elseif child.Name == "Fill" then
-                            TweenService:Create(child, tweenInfo, {BackgroundTransparency = child.Size.X.Offset > 0 and 0 or 0.5}):Play()
+                            child.BackgroundTransparency = child.Size.X.Offset > 0 and 0 or 0.5
                         end
                     end
                 end
@@ -1063,24 +1074,22 @@ local function runMainScript()
                 for _, child in pairs(button:GetChildren()) do
                     if child:IsA("Frame") then
                         if child.Name == "Toggle" or child.Name == "Fill" then
-                            TweenService:Create(child, tweenInfo, {BackgroundTransparency = 1}):Play()
+                            child.BackgroundTransparency = 1
                         end
                     end
                 end
             end
         end
-        local tween = TweenService:Create(Frame, tweenInfo, {ImageTransparency = 1})
-        tween.Completed:Connect(function()
-            Frame.Visible = false
-            if minimizedFrame then
-                minimizedFrame.Position = lastFramePosition
-                minimizedFrame.Visible = true
-                minimizedFrame.BackgroundTransparency = 1
-                minimizedFrame.TextTransparency = 1
-                TweenService:Create(minimizedFrame, tweenInfo, {BackgroundTransparency = 0, TextTransparency = 0}):Play()
-            end
-        end)
-        tween:Play()
+        Frame.ImageTransparency = 1
+        Frame.Visible = false
+        if minimizedFrame then
+            minimizedFrame.Position = lastFramePosition
+            minimizedFrame.Visible = true
+            minimizedFrame.BackgroundTransparency = 1
+            minimizedFrame.TextTransparency = 1
+            minimizedFrame.BackgroundTransparency = 0
+            minimizedFrame.TextTransparency = 0
+        end
     end
 
     local dragging, dragInput, dragStart, startPos
@@ -1220,6 +1229,14 @@ local function runMainScript()
         Toggle.BorderSizePixel = 0
         local ToggleCorner = Instance.new("UICorner", Toggle)
         ToggleCorner.CornerRadius = UDim.new(1, 0)
+
+        local sizeConstraint = Fill:FindFirstChildOfClass("UISizeConstraint")
+        if sizeConstraint then
+            sizeConstraint.MinSize = Vector2.new(0, 0)
+            sizeConstraint.MaxSize = Vector2.new(50, 20)
+            print("Adjusted UISizeConstraint: MinSize:", sizeConstraint.MinSize, "MaxSize:", sizeConstraint.MaxSize)
+        end
+
         local isOn = savedSettings[text] or false
         local buttonTweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
@@ -1233,14 +1250,14 @@ local function runMainScript()
         Button.MouseButton1Click:Connect(function()
             isOn = not isOn
             if isOn then
-                Fill:TweenSize(UDim2.new(0, 50, 0, 20), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
-                Toggle:TweenPosition(UDim2.new(1, -25, 0.5, -10), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
-                TweenService:Create(Fill, buttonTweenInfo, {BackgroundTransparency = 0}):Play()
+                Fill.Size = UDim2.new(0, 50, 0, 20)
+                Toggle.Position = UDim2.new(1, -25, 0.5, -10)
+                Fill.BackgroundTransparency = 0
                 if text == "Teleport Fruit" then disableCollisions() end
             else
-                Fill:TweenSize(UDim2.new(0, 0, 0, 20), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
-                Toggle:TweenPosition(UDim2.new(1, -55, 0.5, -10), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
-                TweenService:Create(Fill, buttonTweenInfo, {BackgroundTransparency = 0.5}):Play()
+                Fill.Size = UDim2.new(0, 0, 0, 20)
+                Toggle.Position = UDim2.new(1, -55, 0.5, -10)
+                Fill.BackgroundTransparency = 0.5
                 if text == "Teleport Fruit" then stopAllConnections() end
             end
             callback(isOn)
