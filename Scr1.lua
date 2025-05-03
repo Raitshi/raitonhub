@@ -1172,7 +1172,7 @@ local function runMainScript()
    local function findClosestFruit()
     local hrp = getHRP()
     if not hrp then 
-        print("[⚠️] getHRP вернул nil — персонаж не найден")
+        print("⚠️] getHRP вернул nil — персонаж не найден")
         return nil 
     end
 
@@ -2026,29 +2026,44 @@ end
         writefile(SAVE_FILE, tostring(time))
     end
 
-    local function getBeli()
-        local maxWaitTime = 10
-        local waitTime = 0.5
-        local attempts = 0
-        local maxAttempts = math.floor(maxWaitTime / waitTime)
+  -- Функция для получения Beli
+local function getBeli()
+    local maxWaitTime = 10
+    local waitTime = 0.5
+    local attempts = 0
+    local maxAttempts = math.floor(maxWaitTime / waitTime)
 
-        while attempts < maxAttempts do
-            if player.Data and player.Data:FindFirstChild("Beli") and player.Data.Beli.Value ~= nil then
-                return player.Data.Beli.Value
-            end
-            task.wait(waitTime)
-            attempts = attempts + 1
+    while attempts < maxAttempts do
+        local success, beli = pcall(function()
+            return player.Data and player.Data:FindFirstChild("Beli") and player.Data.Beli.Value
+        end)
+        if success and beli ~= nil then
+            return beli
         end
-        return nil
+        bufferedPrint("[AutoBuy] Не удалось получить Beli, попытка " .. attempts + 1)
+        task.wait(waitTime)
+        attempts = attempts + 1
     end
+    bufferedPrint("[AutoBuy] Ошибка: Не удалось загрузить Beli после " .. maxAttempts .. " попыток")
+    return nil
+end
 
-    local function canBuyFruit()
-        if not lastPurchaseTime then return true end
-        local timeSinceLastPurchase = tick() - lastPurchaseTime
-        return timeSinceLastPurchase >= COOLDOWN_DURATION
+-- Функция проверки возможности покупки (кулдаун)
+local function canBuyFruit()
+    if not lastPurchaseTime then
+        return true
     end
+    local timeSinceLastPurchase = tick() - lastPurchaseTime
+    local canBuy = timeSinceLastPurchase >= COOLDOWN_DURATION
+    if not canBuy then
+        bufferedPrint("[AutoBuy] Кулдаун активен, осталось " .. math.floor(COOLDOWN_DURATION - timeSinceLastPurchase) .. " сек")
+    end
+    return canBuy
+end
 
-   local function showNotification(message, color)
+-- Функция отображения уведомления
+local function showNotification(message, color)
+    local success, err = pcall(function()
         local ScreenGui = player:WaitForChild("PlayerGui")
         local NotificationFrame = ScreenGui:FindFirstChild("NotificationFrame")
         if not NotificationFrame then
@@ -2080,79 +2095,93 @@ end
         task.delay(NOTIFICATION_DURATION, function()
             NotificationFrame.Visible = false
         end)
+    end)
+    if not success then
+        bufferedPrint("[AutoBuy] Ошибка уведомления: " .. tostring(err))
+    end
+end
+
+-- Функция покупки случайного фрукта
+local function buyRandomFruit()
+    local beli = getBeli()
+    if beli == nil then
+        showNotification("Ошибка: Не удалось загрузить Beli", Color3.fromRGB(255, 0, 0))
+        return false
     end
 
-    local function buyRandomFruit()
-        local beli = getBeli()
-        if beli == nil then
-            showNotification("Ошибка: Не удалось загрузить Beli", Color3.fromRGB(255, 0, 0))
-            return false
-        end
+    if not canBuyFruit() then
+        showNotification("Кулдаун активен", Color3.fromRGB(255, 165, 0))
+        return false
+    end
 
-        local minPrice = 50000
-        if beli < minPrice then
-            showNotification("Недостаточно Beli (" .. minPrice .. ")", Color3.fromRGB(255, 165, 0))
-            return false
-        end
+    showNotification("Попытка покупки...", Color3.fromRGB(255, 255, 0))
+    bufferedPrint("[AutoBuy] Пытаюсь купить случайный фрукт...")
 
-        lastPurchaseTime = loadLastPurchaseTime()
-        if not canBuyFruit() then
+    local success, result = pcall(function()
+        return ReplicatedStorage.Remotes.CommF_:InvokeServer("Cousin", "Buy")
+    end)
+
+    if success then
+        if result == true or (typeof(result) == "string" and result ~= "Cooldown" and result ~= "NotEnoughMoney") then
+            lastPurchaseTime = tick()
+            saveLastPurchaseTime(lastPurchaseTime)
+            local message = typeof(result) == "string" and "Куплен фрукт: " .. result or "Фрукт успешно куплен!"
+            showNotification(message, Color3.fromRGB(0, 255, 0))
+            bufferedPrint("[AutoBuy] Успешная покупка: " .. message)
+            return true
+        elseif result == "Cooldown" then
+            lastPurchaseTime = tick()
+            saveLastPurchaseTime(lastPurchaseTime)
             showNotification("Кулдаун активен", Color3.fromRGB(255, 165, 0))
+            bufferedPrint("[AutoBuy] Кулдаун от сервера")
             return false
-        end
-
-        showNotification("Попытка покупки...", Color3.fromRGB(255, 255, 0))
-        local success, result = pcall(function()
-            return ReplicatedStorage.Remotes.CommF_:InvokeServer("Cousin", "Buy")
-        end)
-
-        if success then
-            if result == true or (typeof(result) == "string" and result ~= "Cooldown" and result ~= "NotEnoughMoney") then
-                lastPurchaseTime = tick()
-                saveLastPurchaseTime(lastPurchaseTime)
-                if typeof(result) == "string" then
-                    showNotification("Куплен фрукт: " .. result, Color3.fromRGB(0, 255, 0))
-                else
-                    showNotification("Фрукт успешно куплен!", Color3.fromRGB(0, 255, 0))
-                end
-                return true
-            elseif result == "Cooldown" then
-                showNotification("Кулдаун активен", Color3.fromRGB(255, 165, 0))
-                lastPurchaseTime = tick()
-                saveLastPurchaseTime(lastPurchaseTime)
-                return false
-            elseif result == "NotEnoughMoney" then
-                showNotification("Недостаточно Beli", Color3.fromRGB(255, 165, 0))
-                return false
-            else
-                showNotification("Неизвестная ошибка", Color3.fromRGB(255, 0, 0))
-                return false
-            end
+        elseif result == "NotEnoughMoney" then
+            showNotification("Недостаточно Beli", Color3.fromRGB(255, 165, 0))
+            bufferedPrint("[AutoBuy] Недостаточно Beli (сервер)")
+            return false
         else
-            showNotification("Ошибка покупки: " .. tostring(result), Color3.fromRGB(255, 0, 0))
+            showNotification("Неизвестная ошибка", Color3.fromRGB(255, 0, 0))
+            bufferedPrint("[AutoBuy] Неизвестный результат: " .. tostring(result))
             return false
         end
+    else
+        showNotification("Ошибка покупки: " .. tostring(result), Color3.fromRGB(255, 0, 0))
+        bufferedPrint("[AutoBuy] Ошибка при покупке: " .. tostring(result))
+        return false
     end
+end
 
-   local function startAutoBuy()
-        while autoBuyEnabled do
-            if game:IsLoaded() then
-                local player = Players.LocalPlayer
-                if not player then
-                    task.wait(1)
-                    continue
-                end
-                
-                local beli = getBeli()
-                if beli and beli >= 50000 then
-                    buyRandomFruit()
-                end
-            else
+-- Основная функция автоматической покупки
+local function startAutoBuy()
+    bufferedPrint("[AutoBuy] Запуск автоматической покупки...")
+    while autoBuyEnabled do
+        local success, err = pcall(function()
+            if not game:IsLoaded() then
+                bufferedPrint("[AutoBuy] Ожидание загрузки игры...")
                 game.Loaded:Wait()
             end
-            task.wait(30)
+
+            if not player or not player.Parent then
+                bufferedPrint("[AutoBuy] Ожидание игрока...")
+                player = Players.LocalPlayer
+                while not player or not player.Parent do
+                    player = Players.LocalPlayer
+                    task.wait(1)
+                end
+            end
+
+            buyRandomFruit()
+        end)
+
+        if not success then
+            bufferedPrint("[AutoBuy] Ошибка в цикле: " .. tostring(err))
+            showNotification("Ошибка в AutoBuy: " .. tostring(err), Color3.fromRGB(255, 0, 0))
         end
+
+        task.wait(10) -- Пытаться каждые 10 секунд
     end
+    bufferedPrint("[AutoBuy] Автоматическая покупка остановлена")
+end
 
     local function startServerHop()
     print("[Server Hop] Функция запущена")
@@ -2682,4 +2711,3 @@ else
 end
 
 print("[Main] Инициализация основного скрипта...")
-runMainScript()
